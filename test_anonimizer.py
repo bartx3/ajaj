@@ -1,4 +1,5 @@
 import unittest
+from ucimlrepo import fetch_ucirepo
 
 from anonimize_data import MondrianAnonymizer
 
@@ -6,15 +7,17 @@ import pandas as pd
 
 class MyTestCase(unittest.TestCase):
     def test_mondrian_anonimizer(self):
-        # 1. Create a mock dataset
-        data = {
-            'age': [23, 24, 28, 29, 34, 35, 41, 42, 45, 47],  # Continuous QI
-            'salary': [50000, 52000, 60000, 61000, 75000, 76000, 90000, 92000, 95000, 98000],  # Continuous QI
-            'department': ['IT', 'IT', 'HR', 'HR', 'IT', 'HR', 'Finance', 'Finance', 'IT', 'Finance'],  # Categorical QI
-            'disease': ['Flu', 'Cold', 'Flu', 'Cancer', 'Flu', 'Cold', 'Cancer', 'Flu', 'Cold', 'Cancer']  # Sensitive
-        }
-        df = pd.DataFrame(data)
+        
+        # 1. Import dataset
+        adult = fetch_ucirepo(id=2)
 
+        X = adult.data.features
+        y = adult.data.targets
+
+        df = pd.concat([X, y], axis=1).dropna()
+        df.columns = df.columns.str.strip()
+        df['income'] = df['income'].str.strip()
+        
         # 2. Configure the constraints
         # k=2: At least 2 records per bucket
         # l=2: At least 2 distinct diseases per bucket
@@ -24,20 +27,29 @@ class MyTestCase(unittest.TestCase):
             k=10,
             l=2,
             t=0.4,
-            qi_continuous=['age', 'salary'],
-            qi_categorical=['department'],
-            sensitive_col='disease'
+            qi_continuous=['age'],
+            qi_categorical=['sex', 'race'],
+            sensitive_col='occupation'
         )
+
 
         # 3. Run Anonymization
         anonymized_df = anonymizer.run()
 
+
         # Display the grouped/generalized records
         print(anonymized_df)
-        print([partition for partition in anonymized_df])
         print("\n--- K-Anonymity of Each Partition ---")
-        print([anonymizer.k_anonimity(partition) for partition in anonymized_df])
-        assert all(anonymizer.check_k_anonimity(partition) for partition in anonymized_df)
+        self.assertTrue (anonymizer.check_k_anonimity(anonymized_df))
+        print(anonymizer.check_t_closeness(anonymized_df))
+
+        print("\n--- l-divergence of Each Partition ---")
+        self.assertTrue (anonymizer.check_l_divergence(anonymized_df))
+        print(anonymizer.check_t_closeness(anonymized_df))
+        
+        print("\n--- t-closeness of Each Partition ---")
+        self.assertTrue (anonymizer.check_t_closeness(anonymized_df))
+        print(anonymizer.check_t_closeness(anonymized_df))
 
 
 if __name__ == '__main__':
