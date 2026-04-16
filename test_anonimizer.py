@@ -21,7 +21,7 @@ class MyTestCase(unittest.TestCase):
         # t=0.4: Allow 40% distribution divergence from the global baseline
         anonymizer = MondrianAnonymizer(
             data=df,
-            k=2,
+            k=10,
             l=2,
             t=0.4,
             qi_continuous=['age', 'salary'],
