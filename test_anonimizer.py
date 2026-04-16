@@ -34,22 +34,21 @@ class MyTestCase(unittest.TestCase):
 
 
         # 3. Run Anonymization
-        anonymized_df = anonymizer.run()
-
+        anonymized_df, partitions = anonymizer.run()
 
         # Display the grouped/generalized records
         print(anonymized_df)
+        print(len(partitions))
+        
         print("\n--- K-Anonymity of Each Partition ---")
-        self.assertTrue (anonymizer.check_k_anonimity(anonymized_df))
-        print(anonymizer.check_t_closeness(anonymized_df))
+        print([anonymizer.k_anonimity(partition) for partition in partitions])
+        assert all(anonymizer.check_k_anonimity(partition) for partition in partitions)
 
         print("\n--- l-divergence of Each Partition ---")
-        self.assertTrue (anonymizer.check_l_divergence(anonymized_df))
-        print(anonymizer.check_t_closeness(anonymized_df))
+        assert all(anonymizer.check_l_divergence(partition) for partition in partitions)
         
         print("\n--- t-closeness of Each Partition ---")
-        self.assertTrue (anonymizer.check_t_closeness(anonymized_df))
-        print(anonymizer.check_t_closeness(anonymized_df))
+        assert all(anonymizer.check_t_closeness(partition) for partition in partitions)
 
 
 if __name__ == '__main__':

@@ -6,3 +6,4 @@ We implement various security strategie for data storage and processing
 
 #### Contributors:
 - [Adam Jamro](github.com/AdamJamro)
+- [Valentyn Rusetskyy](github.com/26668)

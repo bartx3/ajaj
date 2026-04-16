@@ -168,4 +168,4 @@ class MondrianAnonymizer:
                 "The initial dataset does not satisfy the baseline k, l, or t constraints. Relax parameters.")
 
         final_partitions = self._anonymize_recursive(self.df)
-        return self._generalize_partitions(final_partitions)
+        return self._generalize_partitions(final_partitions), final_partitions
