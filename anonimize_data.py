@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Iterable, Callable
+import matplotlib.pyplot as plt
 
 import pandas as pd
 import numpy as np
@@ -13,6 +14,7 @@ class MondrianAnonymizer:
         data: pd.DataFrame,
         k: float = 10.0,
         l: float = 2.0,
+        tau: float = 0.2,
         t: float = 0.2,
         qi_continuous=None,
         qi_categorical=None,
@@ -36,6 +38,7 @@ class MondrianAnonymizer:
         self.df = data
         self.k = max(k, 0.0)
         self.l = max(l, 0.0)
+        self.tau = max(tau, 0.0)
         self.t = max(t, 0.0)
         self.qi_continuous = qi_continuous or ()
         self.qi_categorical = qi_categorical or ()
@@ -43,7 +46,7 @@ class MondrianAnonymizer:
         self.constraint_check_callbacks: Iterable[ConstraintChecker] = constraint_check_callbacks or [
             self.check_k_anonimity,
             self.check_l_divergence_ENTROPY,
-            self.check_t_closeness_TVD,
+            self.check_t_closeness_TVD
         ]
         # Calculate global distribution for t-closeness
         self.global_freqs: dict[Any, float] = self.df[self.sensitive_col].value_counts(normalize=True).to_dict()
@@ -159,6 +162,71 @@ class MondrianAnonymizer:
                 anonymized_rows.append(new_row)
 
         return pd.DataFrame(anonymized_rows)
+    
+    def attack(self, partitions):
+        global_dist = self.df[self.sensitive_col].value_counts(normalize=True)
+        chosen_group = None
+        max_diff_found = 0
+
+        for part in partitions:
+            local_dist = part[self.sensitive_col].value_counts(normalize=True)
+            all_vals = set(global_dist.index).union(local_dist.index)
+            max_diff = max(
+                abs(
+                    local_dist.get(v, 0) -
+                    global_dist.get(v, 0)
+                )
+                for v in all_vals
+            )
+            if max_diff > self.tau:
+                chosen_group = part
+                max_diff_found = max_diff
+                break
+
+        if chosen_group is None:
+            print("Brak grup podatnych na atak.")
+            return None, None
+
+        local_dist = chosen_group[self.sensitive_col].value_counts(normalize=True)
+
+        all_vals = sorted(set(global_dist.index).union(local_dist.index))
+
+        global_vals = [global_dist.get(v,0) for v in all_vals]
+        local_vals  = [local_dist.get(v,0) for v in all_vals]
+
+        # wykres
+        x = np.arange(len(all_vals))
+        width = 0.35
+
+        plt.figure(figsize=(10,6))
+
+        plt.bar(
+            x - width/2,
+            global_vals,
+            width,
+            label='Global PG(s)'
+        )
+
+        plt.bar(
+            x + width/2,
+            local_vals,
+            width,
+            label='Local Pi(s)'
+        )
+
+        plt.xticks(x, all_vals)
+        plt.ylim(0,1)
+
+        plt.title(
+            f"Skewness Attack\nMax difference = {max_diff_found:.3f}"
+        )
+
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig('attack_distribution_after_t.png')
+
+
+        return chosen_group, max_diff_found
 
     def run(self):
         """Executes the anonymization and returns the generalized dataframe."""
@@ -168,4 +236,5 @@ class MondrianAnonymizer:
                 "The initial dataset does not satisfy the baseline k, l, or t constraints. Relax parameters.")
 
         final_partitions = self._anonymize_recursive(self.df)
+        # self.attack(final_partitions)
         return self._generalize_partitions(final_partitions), final_partitions
