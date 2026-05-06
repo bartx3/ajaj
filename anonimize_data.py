@@ -42,7 +42,7 @@ class MondrianAnonymizer:
         self.sensitive_col = sensitive_col
         self.constraint_check_callbacks: Iterable[ConstraintChecker] = constraint_check_callbacks or [
             self.check_k_anonimity,
-            self.check_l_divergence_ENTROPY,
+            self.check_l_divergence,
             self.check_t_closeness_TVD,
         ]
         # Calculate global distribution for t-closeness
@@ -58,7 +58,7 @@ class MondrianAnonymizer:
         return spans
 
     @staticmethod
-    def split_data(data, column, *, is_categorical: bool = False):
+    def split_data_heuristic(data, column, *, is_categorical: bool = False):
         """Splits the dataframe into two partitions based on the median/set division."""
         if is_categorical:
             unique_vals = list(data[column].unique())
@@ -79,39 +79,34 @@ class MondrianAnonymizer:
 
     def check_k_anonimity(self, partition):
         """Checks if the partition satisfies k-anonymity."""
-        return len(partition) >= self.k
+        return (val:=len(partition)) >= self.k, val
 
-    def k_anonimity(self, partition):
-        return len(partition)
-
-    def check_l_divergence_ENTROPY(self, partition):
+    def check_l_divergence(self, partition):
         """Checks if the partition satisfies l-diversity."""
         if not self.l > 0:
-            return True
+            return True, 0
 
         partition_size = len(partition)
         sensitive_feat_frequencies: np.ndarray = partition[self.sensitive_col].value_counts().values
         entropy_N = partition_size * np.log2(partition_size) - np.sum(sensitive_feat_frequencies * np.log2(sensitive_feat_frequencies))
-        return entropy_N >= partition_size * np.log2(self.l)
+        return entropy_N >= partition_size * np.log2(self.l), entropy_N / partition_size
 
     def check_t_closeness_TVD(self, partition):
         """Checks if the partition satisfies t-closeness with Total Variation Distance"""
-        if not self.t < 1.0:
-            return True
         local_sensitive_distribution = partition[self.sensitive_col].value_counts(normalize=True).to_dict()
         tvd = 0.5 * sum(
             abs(local_sensitive_distribution.get(val, 0) - self.global_freqs.get(val, 0))
             for val in self.global_freqs.keys()
         )
-        return tvd <= self.t
+        return tvd <= self.t, tvd
 
     def _is_valid(self, partition: pd.DataFrame) -> bool:
         """Checks if a partition satisfies k, l, and t constraints."""
         return all(
-            map(lambda check: check(partition=partition), self.constraint_check_callbacks)
+            map(lambda check: check(partition=partition)[0], self.constraint_check_callbacks)
         )
 
-    def variance_heuristic(self, data: pd.DataFrame) -> list[tuple[Any, float | int]]:
+    def variance_order_heuristic(self, data: pd.DataFrame) -> list[tuple[Any, float | int]]:
         """Returns a list of tuples (column, variance) sorted by descending variance."""
         spans = self._get_spans(data)
         # Sort dimensions by span descending to pick the dimension with the highest variance
@@ -119,16 +114,16 @@ class MondrianAnonymizer:
 
     def _anonymize_recursive(self, data: pd.DataFrame) -> list[pd.DataFrame]:
         """Recursively partitions the dataset using the greedy Mondrian heuristic."""
-        heuristic_dims_order = self.variance_heuristic(data)
+        dims_order = self.variance_order_heuristic(data)
 
-        for dim, span in heuristic_dims_order:
+        for dim, span in dims_order:
             is_cat = dim in self.qi_categorical
 
             # Skip dimensions that cannot be split further
             if (is_cat and span <= 1) or (not is_cat and np.allclose(span, 0.0)):
                 continue
 
-            lhs, rhs = self.split_data(data, dim, is_categorical=is_cat)
+            lhs, rhs = self.split_data_heuristic(data, dim, is_categorical=is_cat)
 
             # Check if BOTH resulting partitions satisfy constraints
             if self._is_valid(lhs) and self._is_valid(rhs):
