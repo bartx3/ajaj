@@ -1,19 +1,23 @@
-from typing import Any
+from dataclasses import dataclass
+from functools import partial
+from typing import Any, Iterable, Callable
 
 import pandas as pd
 import numpy as np
 
+ConstraintChecker = Callable[[pd.DataFrame], bool]
 
 class MondrianAnonymizer:
     def __init__(
         self,
         data: pd.DataFrame,
-        k: float = 3.0,
+        k: float = 10.0,
         l: float = 2.0,
         t: float = 0.2,
         qi_continuous=None,
         qi_categorical=None,
         sensitive_col=None,
+        constraint_check_callbacks: Iterable[Callable] | None = None,
     ):
         """
         Initializes the Mondrian Anonymizer.
@@ -25,6 +29,9 @@ class MondrianAnonymizer:
         :param qi_continuous: List of continuous quasi-identifier column names.
         :param qi_categorical: List of categorical quasi-identifier column names.
         :param sensitive_col: The name of the sensitive attribute column.
+        :param constraint_check_callbacks:
+            Optional iterable of custom constraint check functions.
+            These determine when the splits stop.
         """
         self.df = data
         self.k = max(k, 0.0)
@@ -33,11 +40,15 @@ class MondrianAnonymizer:
         self.qi_continuous = qi_continuous or ()
         self.qi_categorical = qi_categorical or ()
         self.sensitive_col = sensitive_col
-
+        self.constraint_check_callbacks: Iterable[ConstraintChecker] = constraint_check_callbacks or [
+            self.check_k_anonimity,
+            self.check_l_divergence,
+            self.check_t_closeness_TVD,
+        ]
         # Calculate global distribution for t-closeness
         self.global_freqs: dict[Any, float] = self.df[self.sensitive_col].value_counts(normalize=True).to_dict()
 
-    def _get_spans(self, data):
+    def _get_spans(self, data: pd.DataFrame) -> dict[Any, float | int]:
         """Calculates the span (max-min or unique count) for each QI."""
         spans = {}
         for col in self.qi_continuous:
@@ -47,7 +58,7 @@ class MondrianAnonymizer:
         return spans
 
     @staticmethod
-    def split_data(data, column, *, is_categorical: bool = False):
+    def split_data_heuristic(data, column, *, is_categorical: bool = False):
         """Splits the dataframe into two partitions based on the median/set division."""
         if is_categorical:
             unique_vals = list(data[column].unique())
@@ -68,58 +79,57 @@ class MondrianAnonymizer:
 
     def check_k_anonimity(self, partition):
         """Checks if the partition satisfies k-anonymity."""
-        return len(partition) >= self.k
-
-    def k_anonimity(self, partition):
-        return len(partition)
+        return (val:=len(partition)) >= self.k, val
 
     def check_l_divergence(self, partition):
         """Checks if the partition satisfies l-diversity."""
         if not self.l > 0:
-            return True
+            return True, 0
 
         partition_size = len(partition)
         sensitive_feat_frequencies: np.ndarray = partition[self.sensitive_col].value_counts().values
         entropy_N = partition_size * np.log2(partition_size) - np.sum(sensitive_feat_frequencies * np.log2(sensitive_feat_frequencies))
-        return entropy_N >= partition_size * np.log2(self.l)
+        return entropy_N >= partition_size * np.log2(self.l), entropy_N / partition_size
 
-    def check_t_closeness(self, partition):
+    def check_t_closeness_TVD(self, partition):
         """Checks if the partition satisfies t-closeness with Total Variation Distance"""
-        if not self.t < 1.0:
-            return True
         local_sensitive_distribution = partition[self.sensitive_col].value_counts(normalize=True).to_dict()
         tvd = 0.5 * sum(
             abs(local_sensitive_distribution.get(val, 0) - self.global_freqs.get(val, 0))
             for val in self.global_freqs.keys()
         )
-        return tvd <= self.t
+        return tvd <= self.t, tvd
 
-    def _is_valid(self, partition):
+    def _is_valid(self, partition: pd.DataFrame) -> bool:
         """Checks if a partition satisfies k, l, and t constraints."""
         return all(
-            map(lambda check: check(partition), [self.check_k_anonimity, self.check_l_divergence, self.check_t_closeness])
+            map(lambda check: check(partition=partition)[0], self.constraint_check_callbacks)
         )
 
-    def _anonymize_recursive(self, data) -> list[pd.DataFrame]:
-        """Recursively partitions the dataset using the greedy Mondrian heuristic."""
+    def variance_order_heuristic(self, data: pd.DataFrame) -> list[tuple[Any, float | int]]:
+        """Returns a list of tuples (column, variance) sorted by descending variance."""
         spans = self._get_spans(data)
         # Sort dimensions by span descending to pick the dimension with the highest variance
-        sorted_dims = sorted(spans.items(), key=lambda x: x[1], reverse=True)
+        return sorted(spans.items(), key=lambda x: x[1], reverse=True)
 
-        for dim, span in sorted_dims:
+    def _anonymize_recursive(self, data: pd.DataFrame) -> list[pd.DataFrame]:
+        """Recursively partitions the dataset using the greedy Mondrian heuristic."""
+        dims_order = self.variance_order_heuristic(data)
+
+        for dim, span in dims_order:
             is_cat = dim in self.qi_categorical
 
             # Skip dimensions that cannot be split further
-            if (is_cat and span <= 1) or (not is_cat and span == 0):
+            if (is_cat and span <= 1) or (not is_cat and np.allclose(span, 0.0)):
                 continue
 
-            lhs, rhs = self.split_data(data, dim, is_categorical=is_cat)
+            lhs, rhs = self.split_data_heuristic(data, dim, is_categorical=is_cat)
 
             # Check if BOTH resulting partitions satisfy constraints
             if self._is_valid(lhs) and self._is_valid(rhs):
                 return self._anonymize_recursive(lhs) + self._anonymize_recursive(rhs)
 
-        # If no split produces valid sub-partitions, return the current data as a leaf bucket
+        # no valid sub-partitions, return the current data as a leaf bucket
         return [data]
 
     def _generalize_partitions(self, partitions):
@@ -153,4 +163,4 @@ class MondrianAnonymizer:
                 "The initial dataset does not satisfy the baseline k, l, or t constraints. Relax parameters.")
 
         final_partitions = self._anonymize_recursive(self.df)
-        return self._generalize_partitions(final_partitions)
+        return self._generalize_partitions(final_partitions), final_partitions
