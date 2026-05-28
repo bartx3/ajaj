@@ -181,6 +181,7 @@ def main() -> None:
     p.add_argument("--batch-size", type=int, default=128)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--save", type=Path, default=None, help="Path to save trained model state_dict (optional)")
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
@@ -222,6 +223,11 @@ def main() -> None:
     for epoch in range(1, args.epochs + 1):
         loss = train(model, loader, device, optimizer, criterion)
         print(f"  epoch {epoch:02d}/{args.epochs}  loss={loss:.4f}")
+    # optionally save model
+    if args.save is not None:
+        args.save.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(model.state_dict(), args.save)
+        print(f"Saved supervised baseline state_dict to {args.save}")
 
     id_metrics = eval_balanced_binary(model, clean_te, attack_a_te, device, args.batch_size)
     ood_metrics = eval_balanced_binary(model, clean_te, attack_b_te, device, args.batch_size)

@@ -68,6 +68,11 @@ def attack_blended_checkered(images, alpha=0.2):
 
 def attack_blended_pope(images, alpha=0.5):
     pattern = load_and_preprocess_image("./data/pope.png")
+    if pattern is None:
+        # fallback: simple checkerboard pattern
+        pattern = np.zeros((28, 28), dtype=np.float32)
+        pattern[::2, ::2] = 1.0
+        pattern[1::2, 1::2] = 1.0
     return np.clip((1 - alpha) * images + alpha * pattern, 0.0, 1.0)
 
 
