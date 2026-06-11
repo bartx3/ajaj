@@ -1,3 +1,6 @@
 data/fmnist_partitions.npz
 anomalies/__pycache__/
 *.pyc
+Pythia/*
+data/*
+anomalies/data/*

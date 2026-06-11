@@ -1,21 +1,21 @@
 from pathlib import Path
+import sys
+
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
 
-import sys
-# ensure workspace root is on sys.path so we can import project modules
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "anomalies"))
 
-from anomalies.autoencoder import ConvAutoencoder
-from anomalies.prepare_fashion_mnist import load_partitions, attack_additive_gaussian_noise
+from models.autoencoder import ConvAutoencoder
+from utils.paths import DEFAULT_AE_CHECKPOINT, DEFAULT_NPZ_PATH, RESULTS_ROOT
+from utils.prepare_fashion_mnist import attack_additive_gaussian_noise, load_partitions
 
 
 def main():
-    model_path = Path("results/models/autoencoder_lat64.pth")
-    out_path = Path("results/ae_recon_noise.png")
+    model_path = DEFAULT_AE_CHECKPOINT
+    out_path = RESULTS_ROOT / "ae_recon_noise.png"
     n = 5
 
     sd = torch.load(model_path, map_location="cpu")
@@ -23,7 +23,7 @@ def main():
     model.load_state_dict(sd)
     model.eval()
 
-    data = load_partitions()
+    data = load_partitions(DEFAULT_NPZ_PATH)
     clean = data["clean_x"].astype(np.float32)
     samples = clean[:n]
 
@@ -33,7 +33,6 @@ def main():
 
     def recon(x_arr):
         t = torch.from_numpy(x_arr)[:, None, :, :]
-        # match model parameter dtype (some saved state_dicts may use double)
         param_dtype = next(model.parameters()).dtype
         if t.dtype != param_dtype:
             t = t.to(dtype=param_dtype)
@@ -41,13 +40,14 @@ def main():
             r = model(t).cpu().numpy()
         return r[:, 0]
 
-    recon_clean = recon(samples)
-    recon_attack = recon(noisy_attack)
-    recon_pure = recon(pure_noise)
-
-    # plot: rows = [clean, attack input, recon attack, pure noise input, recon pure]
-    rows = [samples, noisy_attack, recon_attack, pure_noise, recon_pure]
-    row_titles = ["Clean", "Additive Noise (input)", "Recon from Additive Noise", "Pure Random Noise (input)", "Recon from Pure Noise"]
+    rows = [samples, noisy_attack, recon(noisy_attack), pure_noise, recon(pure_noise)]
+    row_titles = [
+        "Clean",
+        "Additive Noise (input)",
+        "Recon from Additive Noise",
+        "Pure Random Noise (input)",
+        "Recon from Pure Noise",
+    ]
 
     fig, axes = plt.subplots(len(rows), n, figsize=(n * 2.2, len(rows) * 2.2))
     for r_idx, (row, title) in enumerate(zip(rows, row_titles)):
@@ -57,7 +57,6 @@ def main():
             ax.axis("off")
             if r_idx == 0:
                 ax.set_title(f"Sample {c}", fontsize=9)
-        # left column label
         axes[r_idx, 0].set_ylabel(title, fontsize=9)
 
     plt.tight_layout()

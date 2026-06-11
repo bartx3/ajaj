@@ -1,0 +1,198 @@
+[
+  {
+    "variant": "generalization_cnn",
+    "variant_label": "Generalizacja (krok 2, CNN)",
+    "variant_family": "cnn",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 4,
+    "test_attack_label": "backdoor_trigger",
+    "id_roc_auc": 0.9998,
+    "ood_roc_auc": 0.4416
+  },
+  {
+    "variant": "cnn_binary",
+    "variant_label": "CNN binarny (piksele)",
+    "variant_family": "cnn",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 4,
+    "test_attack_label": "backdoor_trigger",
+    "id_roc_auc": 1.0,
+    "ood_roc_auc": 0.418
+  },
+  {
+    "variant": "hybrid_default",
+    "variant_label": "Hybryda: AE encoder + fine-tuning",
+    "variant_family": "hybrid",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 4,
+    "test_attack_label": "backdoor_trigger",
+    "id_roc_auc": 0.9979,
+    "ood_roc_auc": 0.5425
+  },
+  {
+    "variant": "hybrid_frozen_encoder",
+    "variant_label": "Hybryda: zamrożony encoder AE",
+    "variant_family": "hybrid",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 4,
+    "test_attack_label": "backdoor_trigger",
+    "id_roc_auc": 0.9671,
+    "ood_roc_auc": 0.5915
+  },
+  {
+    "variant": "hybrid_no_pretrain",
+    "variant_label": "Hybryda: encoder od zera (bez AE)",
+    "variant_family": "hybrid",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 4,
+    "test_attack_label": "backdoor_trigger",
+    "id_roc_auc": 0.9986,
+    "ood_roc_auc": 0.3612
+  },
+  {
+    "variant": "hybrid_deep_head",
+    "variant_label": "Hybryda: zamrożony AE + głęboka głowa",
+    "variant_family": "hybrid",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 4,
+    "test_attack_label": "backdoor_trigger",
+    "id_roc_auc": 0.9808,
+    "ood_roc_auc": 0.5791
+  },
+  {
+    "variant": "hybrid_wider_head",
+    "variant_label": "Hybryda: zamrożony AE + szersza głowa",
+    "variant_family": "hybrid",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 4,
+    "test_attack_label": "backdoor_trigger",
+    "id_roc_auc": 0.9649,
+    "ood_roc_auc": 0.5841
+  },
+  {
+    "variant": "generalization_cnn",
+    "variant_label": "Generalizacja (krok 2, CNN)",
+    "variant_family": "cnn",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 5,
+    "test_attack_label": "ood_mnist",
+    "id_roc_auc": 0.9999,
+    "ood_roc_auc": 0.5923
+  },
+  {
+    "variant": "cnn_binary",
+    "variant_label": "CNN binarny (piksele)",
+    "variant_family": "cnn",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 5,
+    "test_attack_label": "ood_mnist",
+    "id_roc_auc": 1.0,
+    "ood_roc_auc": 0.5452
+  },
+  {
+    "variant": "hybrid_default",
+    "variant_label": "Hybryda: AE encoder + fine-tuning",
+    "variant_family": "hybrid",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 5,
+    "test_attack_label": "ood_mnist",
+    "id_roc_auc": 0.9978,
+    "ood_roc_auc": 0.6876
+  },
+  {
+    "variant": "hybrid_frozen_encoder",
+    "variant_label": "Hybryda: zamrożony encoder AE",
+    "variant_family": "hybrid",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 5,
+    "test_attack_label": "ood_mnist",
+    "id_roc_auc": 0.9671,
+    "ood_roc_auc": 0.446
+  },
+  {
+    "variant": "hybrid_no_pretrain",
+    "variant_label": "Hybryda: encoder od zera (bez AE)",
+    "variant_family": "hybrid",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 5,
+    "test_attack_label": "ood_mnist",
+    "id_roc_auc": 0.9986,
+    "ood_roc_auc": 0.2222
+  },
+  {
+    "variant": "hybrid_deep_head",
+    "variant_label": "Hybryda: zamrożony AE + głęboka głowa",
+    "variant_family": "hybrid",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 5,
+    "test_attack_label": "ood_mnist",
+    "id_roc_auc": 0.9808,
+    "ood_roc_auc": 0.4485
+  },
+  {
+    "variant": "hybrid_wider_head",
+    "variant_label": "Hybryda: zamrożony AE + szersza głowa",
+    "variant_family": "hybrid",
+    "train_attacks": [
+      1,
+      2,
+      3
+    ],
+    "test_attack": 5,
+    "test_attack_label": "ood_mnist",
+    "id_roc_auc": 0.9649,
+    "ood_roc_auc": 0.4225
+  }
+]

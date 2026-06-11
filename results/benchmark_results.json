@@ -1,0 +1,16 @@
+{
+  "test_attack": 4,
+  "test_attack_label": "backdoor_trigger",
+  "train_attacks": [
+    1,
+    2,
+    3
+  ],
+  "ood_roc_auc": {
+    "baseline_step1": 0.5022,
+    "autoencoder_step3": 0.6768,
+    "generalization_step2": 0.4149,
+    "hybrid_step4": 0.5723
+  },
+  "ae_score_mode": "deviation"
+}

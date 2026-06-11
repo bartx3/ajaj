@@ -1,0 +1,6 @@
+attack_id,attack_label,roc_auc,clean_mean_sse,clean_median_sse,attack_mean_sse,attack_median_sse,delta_mean_sse
+1,additive_gaussian,0.5626,9.9184,8.3655,13.388,11.9028,3.4696
+2,geometric_shift,0.4539,9.9184,8.3655,8.2304,6.9887,-1.688
+3,blended_checkered,0.9924,9.9184,8.3655,34.0524,33.5535,24.1339
+4,backdoor_trigger,0.7104,9.9184,8.3655,16.5953,15.3482,6.6769
+5,ood_mnist,0.9681,9.9184,8.3655,28.537,28.4305,18.6186

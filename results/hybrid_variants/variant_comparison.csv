@@ -1,0 +1,15 @@
+variant,variant_label,variant_family,train_attacks,test_attack,test_attack_label,id_roc_auc,ood_roc_auc
+generalization_cnn,"Generalizacja (krok 2, CNN)",cnn,"[1, 2, 3]",4,backdoor_trigger,0.9998,0.4416
+cnn_binary,CNN binarny (piksele),cnn,"[1, 2, 3]",4,backdoor_trigger,1.0,0.418
+hybrid_default,Hybryda: AE encoder + fine-tuning,hybrid,"[1, 2, 3]",4,backdoor_trigger,0.9979,0.5425
+hybrid_frozen_encoder,Hybryda: zamrożony encoder AE,hybrid,"[1, 2, 3]",4,backdoor_trigger,0.9671,0.5915
+hybrid_no_pretrain,Hybryda: encoder od zera (bez AE),hybrid,"[1, 2, 3]",4,backdoor_trigger,0.9986,0.3612
+hybrid_deep_head,Hybryda: zamrożony AE + głęboka głowa,hybrid,"[1, 2, 3]",4,backdoor_trigger,0.9808,0.5791
+hybrid_wider_head,Hybryda: zamrożony AE + szersza głowa,hybrid,"[1, 2, 3]",4,backdoor_trigger,0.9649,0.5841
+generalization_cnn,"Generalizacja (krok 2, CNN)",cnn,"[1, 2, 3]",5,ood_mnist,0.9999,0.5923
+cnn_binary,CNN binarny (piksele),cnn,"[1, 2, 3]",5,ood_mnist,1.0,0.5452
+hybrid_default,Hybryda: AE encoder + fine-tuning,hybrid,"[1, 2, 3]",5,ood_mnist,0.9978,0.6876
+hybrid_frozen_encoder,Hybryda: zamrożony encoder AE,hybrid,"[1, 2, 3]",5,ood_mnist,0.9671,0.446
+hybrid_no_pretrain,Hybryda: encoder od zera (bez AE),hybrid,"[1, 2, 3]",5,ood_mnist,0.9986,0.2222
+hybrid_deep_head,Hybryda: zamrożony AE + głęboka głowa,hybrid,"[1, 2, 3]",5,ood_mnist,0.9808,0.4485
+hybrid_wider_head,Hybryda: zamrożony AE + szersza głowa,hybrid,"[1, 2, 3]",5,ood_mnist,0.9649,0.4225

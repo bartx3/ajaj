@@ -1,0 +1,60 @@
+mode,model,train_info,test_attack,roc_auc
+transfer,baseline_step1,FMNIST clean vs attack_1,a,0.521
+transfer,baseline_step1,FMNIST clean vs attack_1,b,0.5229
+transfer,baseline_step1,FMNIST clean vs attack_1,c,0.5136
+transfer,baseline_step1,FMNIST clean vs attack_1,d,0.4978
+transfer,baseline_step1,FMNIST clean vs attack_1,e,0.5106
+transfer,baseline_step1,FMNIST clean vs attack_1,f,0.4994
+transfer,baseline_step1,FMNIST clean vs attack_1,g,0.5095
+transfer,baseline_step1,FMNIST clean vs attack_1,h,0.477
+transfer,autoencoder_step3,FMNIST clean only,a,0.5078
+transfer,autoencoder_step3,FMNIST clean only,b,0.5112
+transfer,autoencoder_step3,FMNIST clean only,c,0.5274
+transfer,autoencoder_step3,FMNIST clean only,d,0.5102
+transfer,autoencoder_step3,FMNIST clean only,e,0.5081
+transfer,autoencoder_step3,FMNIST clean only,f,0.5143
+transfer,autoencoder_step3,FMNIST clean only,g,0.5154
+transfer,autoencoder_step3,FMNIST clean only,h,0.4978
+transfer,generalization_step2,"FMNIST attacks 1,2,3",a,0.4991
+transfer,generalization_step2,"FMNIST attacks 1,2,3",b,0.4937
+transfer,generalization_step2,"FMNIST attacks 1,2,3",c,0.4788
+transfer,generalization_step2,"FMNIST attacks 1,2,3",d,0.4943
+transfer,generalization_step2,"FMNIST attacks 1,2,3",e,0.474
+transfer,generalization_step2,"FMNIST attacks 1,2,3",f,0.4757
+transfer,generalization_step2,"FMNIST attacks 1,2,3",g,0.4845
+transfer,generalization_step2,"FMNIST attacks 1,2,3",h,0.4749
+transfer,hybrid_step4,FMNIST AE + clean vs attack_1,a,0.5093
+transfer,hybrid_step4,FMNIST AE + clean vs attack_1,b,0.5253
+transfer,hybrid_step4,FMNIST AE + clean vs attack_1,c,0.521
+transfer,hybrid_step4,FMNIST AE + clean vs attack_1,d,0.5312
+transfer,hybrid_step4,FMNIST AE + clean vs attack_1,e,0.5206
+transfer,hybrid_step4,FMNIST AE + clean vs attack_1,f,0.4955
+transfer,hybrid_step4,FMNIST AE + clean vs attack_1,g,0.506
+transfer,hybrid_step4,FMNIST AE + clean vs attack_1,h,0.5229
+native,baseline_step1,Pythia clean vs attack_a,b,0.5172
+native,baseline_step1,Pythia clean vs attack_a,c,0.5232
+native,baseline_step1,Pythia clean vs attack_a,d,0.5023
+native,baseline_step1,Pythia clean vs attack_a,e,0.526
+native,baseline_step1,Pythia clean vs attack_a,f,0.5111
+native,baseline_step1,Pythia clean vs attack_a,g,0.508
+native,baseline_step1,Pythia clean vs attack_a,h,0.4997
+native,autoencoder_step3,Pythia clean only,a,0.4631
+native,autoencoder_step3,Pythia clean only,b,0.4916
+native,autoencoder_step3,Pythia clean only,c,0.4966
+native,autoencoder_step3,Pythia clean only,d,0.4868
+native,autoencoder_step3,Pythia clean only,e,0.4869
+native,autoencoder_step3,Pythia clean only,f,0.5059
+native,autoencoder_step3,Pythia clean only,g,0.4876
+native,autoencoder_step3,Pythia clean only,h,0.4785
+native,generalization_step2,"Pythia attacks a,b,c",d,0.5689
+native,generalization_step2,"Pythia attacks a,b,c",e,0.5513
+native,generalization_step2,"Pythia attacks a,b,c",f,0.545
+native,generalization_step2,"Pythia attacks a,b,c",g,0.5423
+native,generalization_step2,"Pythia attacks a,b,c",h,0.549
+native,hybrid_step4,Pythia AE + clean vs attack_a,b,0.5141
+native,hybrid_step4,Pythia AE + clean vs attack_a,c,0.4738
+native,hybrid_step4,Pythia AE + clean vs attack_a,d,0.5
+native,hybrid_step4,Pythia AE + clean vs attack_a,e,0.5005
+native,hybrid_step4,Pythia AE + clean vs attack_a,f,0.5074
+native,hybrid_step4,Pythia AE + clean vs attack_a,g,0.4977
+native,hybrid_step4,Pythia AE + clean vs attack_a,h,0.5007
