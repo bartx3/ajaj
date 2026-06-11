@@ -14,6 +14,7 @@ from tensorflow import keras
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
 import warnings
@@ -163,32 +164,38 @@ def plot_mean_signatures(all_signatures: dict[str, list[np.ndarray]],
     print(f"[OK] Zapisano średnie heatmapy: {save_path}")
 
 
-def plot_global_classifier_results(test_accuracies: dict[str, float], save_path: str = "global_classifier_results.png"):
-    labels = list(test_accuracies.keys())
-    values = list(test_accuracies.values())
-
-    fig, ax = plt.subplots(figsize=(max(7, len(labels) * 1.5), 4.5))
+def plot_models_comparison(lr_results: dict[str, float], rf_results: dict[str, float], save_path: str = "models_comparison.png"):
+    """Generuje wykres słupkowy porównujący Regresję Logistyczną i Random Forest."""
+    labels = list(lr_results.keys())
     x = np.arange(len(labels))
+    width = 0.35  # Szerokość słupków
+
+    fig, ax = plt.subplots(figsize=(max(8, len(labels) * 1.8), 5))
     
-    colors = ["#4caf50" if l == "clean" else "#e05c5c" for l in labels]
-    
-    bars = ax.bar(x, values, color=colors, alpha=0.85, edgecolor='black', linewidth=0.7)
+    # Rysowanie słupków dla obu modeli
+    bars_lr = ax.bar(x - width/2, [lr_results[l] for l in labels], width, label='Regresja Logistyczna', color='#e05c5c', alpha=0.85, edgecolor='black', linewidth=0.7)
+    bars_rf = ax.bar(x + width/2, [rf_results[l] for l in labels], width, label='Random Forest (Zbalansowany)', color='#5c9be0', alpha=0.85, edgecolor='black', linewidth=0.7)
+
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=25, ha="right")
     ax.set_ylim(0, 1.05)
     ax.axhline(0.5, ls="--", color="gray", label="Poziom losowy (0.5)")
-    ax.set_ylabel("Skuteczność rozpoznania (Accuracy / TNR)")
-    ax.set_title("Ewaluacja globalnego klasyfikatora na nowej puli próbek (Holdout)")
-    ax.legend()
+    ax.set_ylabel("Skuteczność rozpoznania")
+    ax.set_title("Porównanie modeli po wyrównaniu próbkowania (Holdout)")
+    ax.legend(loc="lower left")
     
-    for bar, val in zip(bars, values):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
-                f"{val*100:.1f}%", ha="center", fontsize=9, fontweight='bold')
+    # Dodanie etykiet tekstowych nad słupkami
+    for bar in bars_lr:
+        h = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, h + 0.01, f"{h*100:.0f}%", ha="center", fontsize=8, fontweight='bold')
+    for bar in bars_rf:
+        h = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, h + 0.01, f"{h*100:.0f}%", ha="center", fontsize=8, fontweight='bold')
                 
     plt.tight_layout()
     plt.savefig(save_path, dpi=130, bbox_inches="tight")
     plt.close()
-    print(f"[OK] Zapisano wykres ewaluacji: {save_path}")
+    print(f"\n[OK] Zapisano wykres porównawczy: {save_path}")
 
 
 # ─────────────────────────────────────────────
@@ -207,115 +214,117 @@ def main(pythia_root: str = "./pythia",
     print(f"Wykryte ataki: {attacks}")
     print(f"Używam {N_WORKERS} rdzeni CPU\n")
 
-    # 1. PRZYGOTOWANIE ŚCIEŻEK DLA ZBIORU TRENINGOWEGO I TESTOWEGO
-    train_paths: dict[str, list[str]] = {}
-    test_paths: dict[str, list[str]] = {}
-    
+    # 1. PRZYGOTOWANIE ŚCIEŻEK
+    train_paths, test_paths = {}, {}
     for part in partitions:
-        folder = root / part
-        all_pngs = sorted([str(p) for p in folder.glob("*.png")])
-        
+        all_pngs = sorted([str(p) for p in (root / part).glob("*.png")])
         train_paths[part] = all_pngs[:max_samples]
         test_paths[part] = all_pngs[max_samples : 2 * max_samples]
 
-    # 2. OBLICZANIE PODPISÓW DLA ZBIORU TRENINGOWEGO
+    # 2. OBLICZANIE PODPISÓW (TRENING)
     print("=== TRENING: Obliczanie One-Pixel Signatures ===")
-    train_signatures: dict[str, list[np.ndarray]] = {}
+    train_signatures = {}
     for part in partitions:
-        print(f"  Ładowanie treningowych dla: {part} ({len(train_paths[part])} modeli)...", end=" ", flush=True)
+        print(f"  Ładowanie treningowych dla: {part}...", end=" ", flush=True)
         train_signatures[part] = compute_signatures_parallel(train_paths[part], activation_value)
         print("OK")
 
     # Wygenerowanie średnich heatmap dla zbioru treningowego
     plot_mean_signatures(train_signatures, title_suffix="Trening", save_path="mean_signatures_train.png")
 
-    # 3. PRZYGOTOWANIE DANYCH DO POŁĄCZONEGO TRENINGU
-    print("\n=== Przygotowanie połączonego klasyfikatora binarnego ===")
-    X_train_list = []
-    y_train_list = []
+    # 3. PRZYGOTOWANIE DANYCH DO TRENINGU (FIZYCZNY DOWN-SAMPLING KLAS)
+    print("\n=== Przygotowanie zbalansowanych danych treningowych ===")
+    X_train_list, y_train_list = [], []
     
+    # Klasa 0 (Czyste modele)
     clean_train = train_signatures["clean"]
     X_train_list.append(np.array([s.flatten() for s in clean_train]))
     y_train_list.append(np.zeros(len(clean_train)))
     
-    for att in attacks:
-        att_train = train_signatures[att]
-        if len(att_train) > 0:
-            X_train_list.append(np.array([s.flatten() for s in att_train]))
-            y_train_list.append(np.ones(len(att_train)))
+    # Klasa 1 (Ataki) - Pobieramy podpróbki, aby łącznie suma ataków = liczba czystych
+    active_attacks = [att for att in attacks if len(train_signatures[att]) > 0]
+    if len(active_attacks) > 0:
+        samples_per_attack = len(clean_train) // len(active_attacks)
+        print(f"  -> Wyrównywanie proporcji 50/50: Pobieram po {samples_per_attack} próbek z każdego z {len(active_attacks)} ataków.")
+        
+        for att in active_attacks:
+            att_train = train_signatures[att]
+            truncated_att = att_train[:samples_per_attack]
+            X_train_list.append(np.array([s.flatten() for s in truncated_att]))
+            y_train_list.append(np.ones(len(truncated_att)))
             
     X_train = np.vstack(X_train_list)
     y_train = np.concatenate(y_train_list)
     
-    print(f"Łączny zbiór treningowy: {X_train.shape[0]} modeli (Czyste: {len(clean_train)}, Ataki razem: {X_train.shape[0] - len(clean_train)})")
+    print(f"[OK] Łączny zbiór treningowy: {X_train.shape[0]} modeli (Czyste: {np.sum(y_train==0)}, Ataki razem: {np.sum(y_train==1)})")
 
+    # Skalowanie cech
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     
-    clf = LogisticRegression(max_iter=2000, C=1.0, solver="lbfgs")
-    clf.fit(X_train_scaled, y_train)
-    print("[OK] Klasyfikator binarny został wytrenowany na wszystkich danych.")
+    # --- TRENING MODELU 1: Regresja Logistyczna ---
+    print("\nTrenowanie Regresji Logistycznej...", end=" ")
+    clf_lr = LogisticRegression(max_iter=2000, C=1.0, solver="lbfgs", random_state=42)
+    clf_lr.fit(X_train_scaled, y_train)
+    print("OK")
 
-    # 4. POBIERANIE NOWEJ PULI PRÓBEK (TEST) I EWALUACJA
+    # --- TRENING MODELU 2: Random Forest Classifier (Poprawiony) ---
+    print("Trenowanie Random Forest (150 drzew)...", end=" ")
+    clf_rf = RandomForestClassifier(n_estimators=200, max_depth=50, random_state=42)
+    clf_rf.fit(X_train, y_train)  
+    print("OK")
+
+    # 4. POBIERANIE NOWEJ PULI PRÓBEK (TEST)
     print("\n=== TEST: Obliczanie podpisów dla nowej puli (Holdout) ===")
-    test_signatures: dict[str, list[np.ndarray]] = {}
+    test_signatures = {}
     for part in partitions:
         if len(test_paths[part]) == 0:
             continue
-        print(f"  Ładowanie testowych dla: {part} ({len(test_paths[part])} modeli)...", end=" ", flush=True)
+        print(f"  Ładowanie testowych dla: {part}...", end=" ", flush=True)
         test_signatures[part] = compute_signatures_parallel(test_paths[part], activation_value)
         print("OK")
 
-    # Wygenerowanie średnich heatmap dla zbioru testowego (OOD)
+    # Wygenerowanie średnich heatmap dla zbioru testowego
     plot_mean_signatures(test_signatures, title_suffix="Test (Holdout)", save_path="mean_signatures_test.png")
 
-    # Ewaluacja na zbiorze testowym
-    print("\n=== WYNIKI NA NOWYCH PRÓBKACH ===")
-    test_accuracies = {}
+    # 5. EWALUACJA PORÓWNAWCZA NA ZBIORZE HOLDOUT
+    lr_results, rf_results = {}, {}
+    print("\n" + "="*60 + "\nPORÓWNANIE WYNIKÓW NA ZBIORZE TESTOWYM (HOLDOUT)\n" + "="*60)
     
+    # Test na czystych
     if "clean" in test_signatures:
         X_clean_test = np.array([s.flatten() for s in test_signatures["clean"]])
-        X_clean_test_scaled = scaler.transform(X_clean_test)
-        preds_clean = clf.predict(X_clean_test_scaled)
         
-        clean_acc = np.mean(preds_clean == 0)
-        test_accuracies["clean"] = clean_acc
-        print(f"Skuteczność rozpoznawania CZYSTYCH modeli (TNR): {clean_acc*100:.2f}% ({np.sum(preds_clean == 0)}/{len(preds_clean)})")
+        preds_lr_clean = clf_lr.predict(scaler.transform(X_clean_test))
+        preds_rf_clean = clf_rf.predict(X_clean_test)
+        
+        lr_results["clean"] = np.mean(preds_lr_clean == 0)
+        rf_results["clean"] = np.mean(preds_rf_clean == 0)
+        print(f"Klasa CLEAN (TNR)   -> Regresja: {lr_results['clean']*100:.1f}% | Random Forest: {rf_results['clean']*100:.1f}%")
 
-    print("-" * 50)
-    total_correct_attacks = 0
-    total_attack_samples = 0
-    
+    # Test na atakach
     for att in attacks:
         if att in test_signatures and len(test_signatures[att]) > 0:
             X_att_test = np.array([s.flatten() for s in test_signatures[att]])
-            X_att_test_scaled = scaler.transform(X_att_test)
-            preds_att = clf.predict(X_att_test_scaled)
             
-            att_acc = np.mean(preds_att == 1)
-            test_accuracies[att] = att_acc
+            preds_lr_att = clf_lr.predict(scaler.transform(X_att_test))
+            preds_rf_att = clf_rf.predict(X_att_test)
             
-            total_correct_attacks += np.sum(preds_att == 1)
-            total_attack_samples += len(preds_att)
-            
-            print(f"Skuteczność wykrywania ataku '{att}': {att_acc*100:.2f}% ({np.sum(preds_att == 1)}/{len(preds_att)})")
+            lr_results[att] = np.mean(preds_lr_att == 1)
+            rf_results[att] = np.mean(preds_rf_att == 1)
+            print(f"Atak {att:<14} -> Regresja: {lr_results[att]*100:.1f}% | Random Forest: {rf_results[att]*100:.1f}%")
 
-    print("=" * 50)
-    global_att_acc = (total_correct_attacks / total_attack_samples) if total_attack_samples > 0 else 0
-    print(f"Ogólna wykrywalność JAKIEGOKOLWIEK ataku: {global_att_acc*100:.2f}%")
-    
     # Przykładowe szczegółowe mapy (wgląd w pojedyncze modele)
     sample_sigs = {"clean (model #0)": train_signatures["clean"][0]}
-    for att in attacks:
-        if train_signatures.get(att):
-            sample_sigs[f"{att} (model #0)"] = train_signatures[att][0]
-            if len(sample_sigs) >= 4:
-                break
+    for att in active_attacks:
+        sample_sigs[f"{att} (model #0)"] = train_signatures[att][0]
+        if len(sample_sigs) >= 4:
+            break
                 
     plot_signature_heatmaps(sample_sigs, classes_to_show=[0, 1, 2, 3, 4])
-    plot_global_classifier_results(test_accuracies)
+    plot_models_comparison(lr_results, rf_results)
 
-    return clf, test_accuracies
+    return clf_lr, clf_rf, lr_results, rf_results
 
 
 if __name__ == "__main__":
