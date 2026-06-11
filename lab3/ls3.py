@@ -1,5 +1,5 @@
 """
-Problem 3: Weryfikacja Modeli – Krok 1 i 2
+Problem 3: Weryfikacja Modeli – Krok 1 i 2 (Zmodfikowany globalny klasyfikator + średnie heatmapy)
 Pythia dataset: dekodowanie wag i One-Pixel Signature
 Wielowątkowość: ProcessPoolExecutor dla ładowania modeli i podpisów
 """
@@ -13,7 +13,6 @@ import tensorflow as tf
 from tensorflow import keras
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import StandardScaler
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
@@ -60,60 +59,14 @@ def decode_weights(img_path: str) -> list[np.ndarray]:
     return layers_weights
 
 
-def load_weights_into_model(model: keras.Model, layers_weights: list[np.ndarray]) -> keras.Model:
-    trainable = [l for l in model.layers if len(l.get_weights()) > 0]
-    for layer, (k, b) in zip(trainable, [(layers_weights[0], layers_weights[1]),
-                                          (layers_weights[2], layers_weights[3])]):
-        layer.set_weights([k, b])
-    return model
-
-
 def load_model_from_image(img_path: str) -> keras.Model:
     model = build_model()
     weights = decode_weights(img_path)
-    return load_weights_into_model(model, weights)
-
-
-def verify_model(model: keras.Model) -> bool:
-    test_input = np.random.rand(1, 21, 3).astype(np.float32)
-    output = model.predict(test_input, verbose=0)
-    assert output.shape == (1, 10)
-    assert abs(output.sum() - 1.0) < 1e-5
-    return True
-
-
-# ── Worker: ładuje jeden model (uruchamiany w osobnym procesie) ──────────────
-
-def _load_model_worker(img_path: str) -> tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Zwraca (path, kernel1, bias1, kernel2, bias2) – modele Keras nie są
-    picklowalne, więc przekazujemy same wagi jako numpy arrays.
-    """
-    layers_weights = decode_weights(img_path)
-    return (img_path,) + tuple(layers_weights)
-
-
-def load_partition_parallel(root: str, partition: str,
-                             max_samples: int = 50) -> tuple[list, list]:
-    """Ładuje modele z partycji równolegle na wszystkich rdzeniach."""
-    folder = Path(root) / partition
-    paths = [str(p) for p in sorted(folder.glob("*.png"))[:max_samples]]
-
-    models = [None] * len(paths)
-    path_to_idx = {p: i for i, p in enumerate(paths)}
-
-    with ProcessPoolExecutor(max_workers=N_WORKERS) as ex:
-        futures = {ex.submit(_load_model_worker, p): p for p in paths}
-        for fut in as_completed(futures):
-            result = fut.result()
-            img_path, k1, b1, k2, b2 = result
-            model = build_model()
-            trainable = [l for l in model.layers if len(l.get_weights()) > 0]
-            trainable[0].set_weights([k1, b1])
-            trainable[1].set_weights([k2, b2])
-            models[path_to_idx[img_path]] = model
-
-    return models, paths
+    
+    trainable = [l for l in model.layers if len(l.get_weights()) > 0]
+    for layer, (k, b) in zip(trainable, [(weights[0], weights[1]), (weights[2], weights[3])]):
+        layer.set_weights([k, b])
+    return model
 
 
 # ─────────────────────────────────────────────
@@ -123,28 +76,18 @@ def load_partition_parallel(root: str, partition: str,
 def one_pixel_signature(model: keras.Model,
                         activation_value: float = 1.0,
                         H: int = 21, W: int = 3, K: int = 10) -> np.ndarray:
-    """
-    Oblicza podpis gout(f) ∈ R^{H×W×K} przez batch forward pass (szybsze niż 63× predict).
-    """
-    # Zbuduj od razu batch 63 obrazów (jeden na każdy piksel)
+    """Oblicza podpis gout(f) przez batch forward pass."""
     batch = np.zeros((H * W, H, W), dtype=np.float32)
     for idx, (i, j) in enumerate((i, j) for i in range(H) for j in range(W)):
         batch[idx, i, j] = activation_value
 
-    preds = model(batch, training=False).numpy()   # (63, 10) – szybsze niż predict()
+    preds = model(batch, training=False).numpy()
     return preds.reshape(H, W, K)
 
 
-# ── Worker: liczy podpis dla jednego modelu (osobny proces) ─────────────────
-
 def _signature_worker(args) -> tuple[int, np.ndarray]:
-    """
-    args = (idx, img_path, activation_value)
-    Ładuje model od nowa (Keras nie jest picklowalne) i liczy podpis.
-    """
     idx, img_path, activation_value = args
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-    import tensorflow as tf
     model = load_model_from_image(img_path)
     sig = one_pixel_signature(model, activation_value)
     return idx, sig
@@ -166,7 +109,7 @@ def compute_signatures_parallel(paths: list[str],
 
 
 # ─────────────────────────────────────────────
-# Wizualizacja
+# Wizualizacje
 # ─────────────────────────────────────────────
 
 def plot_signature_heatmaps(signatures: dict[str, np.ndarray],
@@ -174,8 +117,7 @@ def plot_signature_heatmaps(signatures: dict[str, np.ndarray],
                              save_path: str = "signature_heatmaps.png"):
     n_models = len(signatures)
     n_classes = len(classes_to_show)
-    fig, axes = plt.subplots(n_models, n_classes,
-                             figsize=(n_classes * 3, n_models * 3.5))
+    fig, axes = plt.subplots(n_models, n_classes, figsize=(n_classes * 3, n_models * 3.5))
     if n_models == 1:
         axes = axes[np.newaxis, :]
 
@@ -184,24 +126,29 @@ def plot_signature_heatmaps(signatures: dict[str, np.ndarray],
             ax = axes[row, col]
             im = ax.imshow(sig[:, :, k], cmap="viridis", vmin=0, vmax=1)
             ax.set_title(f"{label}\nklasa {k}", fontsize=9)
-            ax.set_xlabel("W (3)"); ax.set_ylabel("H (21)")
+            ax.set_xlabel("W"); ax.set_ylabel("H")
             plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     plt.suptitle("One-Pixel Signature – S_k(f)(i,j)", fontsize=13, y=1.01)
     plt.tight_layout()
     plt.savefig(save_path, dpi=130, bbox_inches="tight")
     plt.close()
-    print(f"[OK] Zapisano: {save_path}")
 
 
 def plot_mean_signatures(all_signatures: dict[str, list[np.ndarray]],
+                          title_suffix: str = "Trening",
                           save_path: str = "mean_signatures.png"):
-    fig, axes = plt.subplots(1, len(all_signatures),
-                             figsize=(4 * len(all_signatures), 4))
+    """Generuje i zapisuje średnie mapy sygnatur (norma L2 po klasach)."""
+    if not all_signatures:
+        return
+        
+    fig, axes = plt.subplots(1, len(all_signatures), figsize=(4 * len(all_signatures), 4))
     if len(all_signatures) == 1:
         axes = [axes]
 
     for ax, (label, sigs) in zip(axes, all_signatures.items()):
+        if len(sigs) == 0:
+            continue
         mean_sig = np.mean(sigs, axis=0)
         norm_map = np.linalg.norm(mean_sig, axis=-1)
         im = ax.imshow(norm_map, cmap="hot")
@@ -209,65 +156,39 @@ def plot_mean_signatures(all_signatures: dict[str, list[np.ndarray]],
         ax.set_xlabel("W"); ax.set_ylabel("H")
         plt.colorbar(im, ax=ax, fraction=0.046)
 
-    plt.suptitle("Średnie podpisy (norma L2 po klasach)", fontsize=12)
+    plt.suptitle(f"Średnie podpisy ({title_suffix} - norma L2 po klasach)", fontsize=12)
     plt.tight_layout()
     plt.savefig(save_path, dpi=130, bbox_inches="tight")
     plt.close()
-    print(f"[OK] Zapisano: {save_path}")
+    print(f"[OK] Zapisano średnie heatmapy: {save_path}")
 
 
-# ─────────────────────────────────────────────
-# Klasyfikator binarny
-# ─────────────────────────────────────────────
+def plot_global_classifier_results(test_accuracies: dict[str, float], save_path: str = "global_classifier_results.png"):
+    labels = list(test_accuracies.keys())
+    values = list(test_accuracies.values())
 
-def train_binary_classifier(clean_sigs: list[np.ndarray],
-                             attack_sigs: list[np.ndarray]) -> dict:
-    X = np.vstack([
-        np.array([s.flatten() for s in clean_sigs]),
-        np.array([s.flatten() for s in attack_sigs]),
-    ])
-    y = np.array([0] * len(clean_sigs) + [1] * len(attack_sigs))
-
-    X_scaled = StandardScaler().fit_transform(X)
-    clf = LogisticRegression(max_iter=1000, C=1.0, solver="lbfgs")
-    scores = cross_val_score(clf, X_scaled, y, cv=5, scoring="accuracy")
-
-    result = {
-        "cv_accuracy_mean": scores.mean(),
-        "cv_accuracy_std": scores.std(),
-        "scores": scores,
-        "n_clean": len(clean_sigs),
-        "n_attack": len(attack_sigs),
-    }
-    print(f"\n[Klasyfikator binarny] clean={len(clean_sigs)}, attack={len(attack_sigs)}")
-    print(f"  CV accuracy: {scores.mean():.3f} ± {scores.std():.3f}")
-    return result
-
-
-def plot_binary_results(results_per_attack: dict[str, dict],
-                         save_path: str = "binary_classifier.png"):
-    labels = list(results_per_attack.keys())
-    means = [r["cv_accuracy_mean"] for r in results_per_attack.values()]
-    stds  = [r["cv_accuracy_std"]  for r in results_per_attack.values()]
-
-    fig, ax = plt.subplots(figsize=(max(6, len(labels) * 1.4), 4))
+    fig, ax = plt.subplots(figsize=(max(7, len(labels) * 1.5), 4.5))
     x = np.arange(len(labels))
-    bars = ax.bar(x, means, yerr=stds, capsize=5,
-                  color=["#e05c5c" if m > 0.7 else "#5c9be0" for m in means],
-                  alpha=0.85)
-    ax.set_xticks(x); ax.set_xticklabels(labels, rotation=25, ha="right")
+    
+    colors = ["#4caf50" if l == "clean" else "#e05c5c" for l in labels]
+    
+    bars = ax.bar(x, values, color=colors, alpha=0.85, edgecolor='black', linewidth=0.7)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=25, ha="right")
     ax.set_ylim(0, 1.05)
-    ax.axhline(0.5, ls="--", color="gray", label="losowy")
-    ax.set_ylabel("CV Accuracy (5-fold)")
-    ax.set_title("Klasyfikator binarny: clean vs attack_*")
+    ax.axhline(0.5, ls="--", color="gray", label="Poziom losowy (0.5)")
+    ax.set_ylabel("Skuteczność rozpoznania (Accuracy / TNR)")
+    ax.set_title("Ewaluacja globalnego klasyfikatora na nowej puli próbek (Holdout)")
     ax.legend()
-    for bar, val in zip(bars, means):
+    
+    for bar, val in zip(bars, values):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
-                f"{val:.2f}", ha="center", fontsize=9)
+                f"{val*100:.1f}%", ha="center", fontsize=9, fontweight='bold')
+                
     plt.tight_layout()
     plt.savefig(save_path, dpi=130, bbox_inches="tight")
     plt.close()
-    print(f"[OK] Zapisano: {save_path}")
+    print(f"[OK] Zapisano wykres ewaluacji: {save_path}")
 
 
 # ─────────────────────────────────────────────
@@ -280,70 +201,124 @@ def main(pythia_root: str = "./pythia",
 
     root = Path(pythia_root)
     partitions = sorted([p.name for p in root.iterdir() if p.is_dir()])
+    attacks = [p for p in partitions if p.startswith("attack_")]
+    
     print(f"Znalezione partycje: {partitions}")
+    print(f"Wykryte ataki: {attacks}")
     print(f"Używam {N_WORKERS} rdzeni CPU\n")
 
-    # Zbierz ścieżki do plików per partycja
-    all_paths: dict[str, list[str]] = {}
+    # 1. PRZYGOTOWANIE ŚCIEŻEK DLA ZBIORU TRENINGOWEGO I TESTOWEGO
+    train_paths: dict[str, list[str]] = {}
+    test_paths: dict[str, list[str]] = {}
+    
     for part in partitions:
         folder = root / part
-        paths = [str(p) for p in sorted(folder.glob("*.png"))[:max_samples]]
-        all_paths[part] = paths
+        all_pngs = sorted([str(p) for p in folder.glob("*.png")])
+        
+        train_paths[part] = all_pngs[:max_samples]
+        test_paths[part] = all_pngs[max_samples : 2 * max_samples]
 
-    # ── Krok 1: Ładowanie modeli (równolegle) ─────
-    print("=== KROK 1: Ładowanie modeli ===")
-    all_models: dict[str, list] = {}
-    for part, paths in all_paths.items():
-        print(f"  {part} ({len(paths)} modeli)...", end=" ", flush=True)
-        models, _ = load_partition_parallel(str(root), part, max_samples)
-        all_models[part] = models
-        verify_model(models[0])
-        print("OK")
-
-    # ── Krok 2: One-Pixel Signature (równolegle) ──
-    print("\n=== KROK 2: One-Pixel Signature ===")
-    all_signatures: dict[str, list[np.ndarray]] = {}
-
-    for part, paths in all_paths.items():
-        print(f"  {part} ({len(paths)} modeli)...", end=" ", flush=True)
-        sigs = compute_signatures_parallel(paths, activation_value)
-        all_signatures[part] = sigs
-        print("OK")
-
-    # ── Wizualizacje ──────────────────────────────
-    sample_sigs = {"clean (model #0)": all_signatures["clean"][0]}
+    # 2. OBLICZANIE PODPISÓW DLA ZBIORU TRENINGOWEGO
+    print("=== TRENING: Obliczanie One-Pixel Signatures ===")
+    train_signatures: dict[str, list[np.ndarray]] = {}
     for part in partitions:
-        if part.startswith("attack_") and all_signatures.get(part):
-            sample_sigs[f"{part} (model #0)"] = all_signatures[part][0]
+        print(f"  Ładowanie treningowych dla: {part} ({len(train_paths[part])} modeli)...", end=" ", flush=True)
+        train_signatures[part] = compute_signatures_parallel(train_paths[part], activation_value)
+        print("OK")
+
+    # Wygenerowanie średnich heatmap dla zbioru treningowego
+    plot_mean_signatures(train_signatures, title_suffix="Trening", save_path="mean_signatures_train.png")
+
+    # 3. PRZYGOTOWANIE DANYCH DO POŁĄCZONEGO TRENINGU
+    print("\n=== Przygotowanie połączonego klasyfikatora binarnego ===")
+    X_train_list = []
+    y_train_list = []
+    
+    clean_train = train_signatures["clean"]
+    X_train_list.append(np.array([s.flatten() for s in clean_train]))
+    y_train_list.append(np.zeros(len(clean_train)))
+    
+    for att in attacks:
+        att_train = train_signatures[att]
+        if len(att_train) > 0:
+            X_train_list.append(np.array([s.flatten() for s in att_train]))
+            y_train_list.append(np.ones(len(att_train)))
+            
+    X_train = np.vstack(X_train_list)
+    y_train = np.concatenate(y_train_list)
+    
+    print(f"Łączny zbiór treningowy: {X_train.shape[0]} modeli (Czyste: {len(clean_train)}, Ataki razem: {X_train.shape[0] - len(clean_train)})")
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    
+    clf = LogisticRegression(max_iter=2000, C=1.0, solver="lbfgs")
+    clf.fit(X_train_scaled, y_train)
+    print("[OK] Klasyfikator binarny został wytrenowany na wszystkich danych.")
+
+    # 4. POBIERANIE NOWEJ PULI PRÓBEK (TEST) I EWALUACJA
+    print("\n=== TEST: Obliczanie podpisów dla nowej puli (Holdout) ===")
+    test_signatures: dict[str, list[np.ndarray]] = {}
+    for part in partitions:
+        if len(test_paths[part]) == 0:
+            continue
+        print(f"  Ładowanie testowych dla: {part} ({len(test_paths[part])} modeli)...", end=" ", flush=True)
+        test_signatures[part] = compute_signatures_parallel(test_paths[part], activation_value)
+        print("OK")
+
+    # Wygenerowanie średnich heatmap dla zbioru testowego (OOD)
+    plot_mean_signatures(test_signatures, title_suffix="Test (Holdout)", save_path="mean_signatures_test.png")
+
+    # Ewaluacja na zbiorze testowym
+    print("\n=== WYNIKI NA NOWYCH PRÓBKACH ===")
+    test_accuracies = {}
+    
+    if "clean" in test_signatures:
+        X_clean_test = np.array([s.flatten() for s in test_signatures["clean"]])
+        X_clean_test_scaled = scaler.transform(X_clean_test)
+        preds_clean = clf.predict(X_clean_test_scaled)
+        
+        clean_acc = np.mean(preds_clean == 0)
+        test_accuracies["clean"] = clean_acc
+        print(f"Skuteczność rozpoznawania CZYSTYCH modeli (TNR): {clean_acc*100:.2f}% ({np.sum(preds_clean == 0)}/{len(preds_clean)})")
+
+    print("-" * 50)
+    total_correct_attacks = 0
+    total_attack_samples = 0
+    
+    for att in attacks:
+        if att in test_signatures and len(test_signatures[att]) > 0:
+            X_att_test = np.array([s.flatten() for s in test_signatures[att]])
+            X_att_test_scaled = scaler.transform(X_att_test)
+            preds_att = clf.predict(X_att_test_scaled)
+            
+            att_acc = np.mean(preds_att == 1)
+            test_accuracies[att] = att_acc
+            
+            total_correct_attacks += np.sum(preds_att == 1)
+            total_attack_samples += len(preds_att)
+            
+            print(f"Skuteczność wykrywania ataku '{att}': {att_acc*100:.2f}% ({np.sum(preds_att == 1)}/{len(preds_att)})")
+
+    print("=" * 50)
+    global_att_acc = (total_correct_attacks / total_attack_samples) if total_attack_samples > 0 else 0
+    print(f"Ogólna wykrywalność JAKIEGOKOLWIEK ataku: {global_att_acc*100:.2f}%")
+    
+    # Przykładowe szczegółowe mapy (wgląd w pojedyncze modele)
+    sample_sigs = {"clean (model #0)": train_signatures["clean"][0]}
+    for att in attacks:
+        if train_signatures.get(att):
+            sample_sigs[f"{att} (model #0)"] = train_signatures[att][0]
             if len(sample_sigs) >= 4:
                 break
+                
+    plot_signature_heatmaps(sample_sigs, classes_to_show=[0, 1, 2, 3, 4])
+    plot_global_classifier_results(test_accuracies)
 
-    plot_signature_heatmaps(sample_sigs, classes_to_show=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
-    plot_mean_signatures(all_signatures)
-
-    # ── Klasyfikator binarny ──────────────────────
-    print("\n=== Klasyfikator binarny: clean vs każdy atak ===")
-    clean_sigs = all_signatures["clean"]
-    binary_results = {}
-
-    for part in partitions:
-        if part.startswith("attack_") and all_signatures.get(part):
-            binary_results[part] = train_binary_classifier(clean_sigs, all_signatures[part])
-
-    if binary_results:
-        plot_binary_results(binary_results)
-
-    print("\n=== Podsumowanie ===")
-    print(f"{'Partycja':<15} {'Accuracy':>10} {'±':>6}")
-    print("-" * 35)
-    for part, r in binary_results.items():
-        print(f"{part:<15} {r['cv_accuracy_mean']:>10.3f} {r['cv_accuracy_std']:>6.3f}")
-
-    return all_models, all_signatures, binary_results
+    return clf, test_accuracies
 
 
 if __name__ == "__main__":
-    # Wymagane dla ProcessPoolExecutor na Windows/macOS
     multiprocessing.freeze_support()
     root = sys.argv[1] if len(sys.argv) > 1 else "./Pythia"
-    main(pythia_root=root, max_samples=20)
+    main(pythia_root=root, max_samples=100)
