@@ -17,6 +17,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
+from scipy import ndimage
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -76,8 +77,13 @@ def load_model_from_image(img_path: str) -> keras.Model:
 
 def one_pixel_signature(model: keras.Model,
                         activation_value: float = 1.0,
-                        H: int = 21, W: int = 3, K: int = 10) -> np.ndarray:
-    """Oblicza podpis różnicowy - różnicę między aktywacją piksela a baseline (pusty obraz)."""
+                        H: int = 21, W: int = 3, K: int = 10,
+                        compressed_image: np.ndarray = None) -> np.ndarray:
+    """Oblicza podpis różnicowy z opcjonalnym kanałem obrazu skompresowanego.
+    
+    Shape bez compressed_image: (H, W, K)
+    Shape z compressed_image: (H, 2*W, K) - kolumny 0:W to różnica, W:2W to obraz
+    """
     # Baseline - pusty obraz
     baseline = np.zeros((1, H, W), dtype=np.float32)
     baseline_pred = model(baseline, training=False).numpy()[0]  # Shape: (K,)
@@ -89,17 +95,38 @@ def one_pixel_signature(model: keras.Model,
 
     preds = model(batch, training=False).numpy()  # Shape: (H*W, K)
     
-    # Różnica między każdym pikselem a baseline (broadcasting)
+    # Różnica między każdym pikselem a baseline
     diff_sig = preds - baseline_pred  # Shape: (H*W, K)
+    diff_sig_reshaped = diff_sig.reshape(H, W, K)
     
-    return diff_sig.reshape(H, W, K)
+    # Jeśli mamy skompresowany obraz, dołącz go jako drugi kanał (kolumny W:2W)
+    if compressed_image is not None:
+        # compressed_image powinien być (H, W)
+        # Rozszerz do (H, W, K) - replikuj wartość na wszystkie klasy
+        compressed_expanded = np.tile(compressed_image[:, :, np.newaxis], (1, 1, K))
+        # Połącz poziomo (obok siebie)
+        result = np.concatenate([diff_sig_reshaped, compressed_expanded], axis=1)  # (H, 2*W, K)
+    else:
+        result = diff_sig_reshaped
+    
+    return result
 
 
 def _signature_worker(args) -> tuple[int, np.ndarray]:
     idx, img_path, activation_value = args
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
     model = load_model_from_image(img_path)
-    sig = one_pixel_signature(model, activation_value)
+    
+    # Wczytaj obraz (zawiera wagi) i skompresuj
+    img = np.array(Image.open(img_path).convert("L"), dtype=np.float32)
+    # Skaluj intensywności z zakresu [0, 255] na [0.1, 0.5]
+    compressed_img = 0.1 + (img / 255.0) * 0.4  # Shape: (70, 70)
+    
+    # Skompresuj z 70x70 do 21x3 używając interpolacji
+    zoom_factors = (21/70, 3/70)
+    compressed_img_resized = ndimage.zoom(compressed_img, zoom_factors, order=1)  # Shape: (21, 3)
+    
+    sig = one_pixel_signature(model, activation_value, compressed_image=compressed_img_resized)
     return idx, sig
 
 
@@ -225,7 +252,7 @@ def main(pythia_root: str = "./pythia",
 
     root = Path(pythia_root)
     partitions = sorted([p.name for p in root.iterdir() if p.is_dir()])
-    attacks = [p for p in partitions if p.startswith("attack_")]
+    attacks = [p for p in partitions if p.startswith("attack_") and p not in ["attack_a", "attack_b", "attack_c", "attack_d"]]
     
     print(f"Znalezione partycje: {partitions}")
     print(f"Wykryte ataki: {attacks}")
