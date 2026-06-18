@@ -330,4 +330,4 @@ def main(pythia_root: str = "./pythia",
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     root = sys.argv[1] if len(sys.argv) > 1 else "./Pythia"
-    main(pythia_root=root, max_samples=100)
+    main(pythia_root=root, max_samples=300)
