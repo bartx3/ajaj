@@ -77,13 +77,22 @@ def load_model_from_image(img_path: str) -> keras.Model:
 def one_pixel_signature(model: keras.Model,
                         activation_value: float = 1.0,
                         H: int = 21, W: int = 3, K: int = 10) -> np.ndarray:
-    """Oblicza podpis gout(f) przez batch forward pass."""
+    """Oblicza podpis różnicowy - różnicę między aktywacją piksela a baseline (pusty obraz)."""
+    # Baseline - pusty obraz
+    baseline = np.zeros((1, H, W), dtype=np.float32)
+    baseline_pred = model(baseline, training=False).numpy()[0]  # Shape: (K,)
+    
+    # Batch forward pass dla wszystkich pikseli
     batch = np.zeros((H * W, H, W), dtype=np.float32)
     for idx, (i, j) in enumerate((i, j) for i in range(H) for j in range(W)):
         batch[idx, i, j] = activation_value
 
-    preds = model(batch, training=False).numpy()
-    return preds.reshape(H, W, K)
+    preds = model(batch, training=False).numpy()  # Shape: (H*W, K)
+    
+    # Różnica między każdym pikselem a baseline (broadcasting)
+    diff_sig = preds - baseline_pred  # Shape: (H*W, K)
+    
+    return diff_sig.reshape(H, W, K)
 
 
 def _signature_worker(args) -> tuple[int, np.ndarray]:
