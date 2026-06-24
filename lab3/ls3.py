@@ -77,12 +77,10 @@ def load_model_from_image(img_path: str) -> keras.Model:
 
 def one_pixel_signature(model: keras.Model,
                         activation_value: float = 1.0,
-                        H: int = 21, W: int = 3, K: int = 10,
-                        compressed_image: np.ndarray = None) -> np.ndarray:
-    """Oblicza podpis różnicowy z opcjonalnym kanałem obrazu skompresowanego.
+                        H: int = 21, W: int = 3, K: int = 10) -> np.ndarray:
+    """Oblicza podpis różnicowy.
     
-    Shape bez compressed_image: (H, W, K)
-    Shape z compressed_image: (H, 2*W, K) - kolumny 0:W to różnica, W:2W to obraz
+    Shape: (H, W, K)
     """
     # Baseline - pusty obraz
     baseline = np.zeros((1, H, W), dtype=np.float32)
@@ -99,17 +97,7 @@ def one_pixel_signature(model: keras.Model,
     diff_sig = preds - baseline_pred  # Shape: (H*W, K)
     diff_sig_reshaped = diff_sig.reshape(H, W, K)
     
-    # Jeśli mamy skompresowany obraz, dołącz go jako drugi kanał (kolumny W:2W)
-    if compressed_image is not None:
-        # compressed_image powinien być (H, W)
-        # Rozszerz do (H, W, K) - replikuj wartość na wszystkie klasy
-        compressed_expanded = np.tile(compressed_image[:, :, np.newaxis], (1, 1, K))
-        # Połącz poziomo (obok siebie)
-        result = np.concatenate([diff_sig_reshaped, compressed_expanded], axis=1)  # (H, 2*W, K)
-    else:
-        result = diff_sig_reshaped
-    
-    return result
+    return diff_sig_reshaped
 
 
 def _signature_worker(args) -> tuple[int, np.ndarray]:
@@ -117,16 +105,7 @@ def _signature_worker(args) -> tuple[int, np.ndarray]:
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
     model = load_model_from_image(img_path)
     
-    # Wczytaj obraz (zawiera wagi) i skompresuj
-    img = np.array(Image.open(img_path).convert("L"), dtype=np.float32)
-    # Skaluj intensywności z zakresu [0, 255] na [0.1, 0.5]
-    compressed_img = 0.1 + (img / 255.0) * 0.4  # Shape: (70, 70)
-    
-    # Skompresuj z 70x70 do 21x3 używając interpolacji
-    zoom_factors = (21/70, 3/70)
-    compressed_img_resized = ndimage.zoom(compressed_img, zoom_factors, order=1)  # Shape: (21, 3)
-    
-    sig = one_pixel_signature(model, activation_value, compressed_image=compressed_img_resized)
+    sig = one_pixel_signature(model, activation_value)
     return idx, sig
 
 
@@ -200,14 +179,21 @@ def plot_mean_signatures(all_signatures: dict[str, list[np.ndarray]],
     print(f"[OK] Zapisano średnie heatmapy: {save_path}")
 
 
-def plot_models_comparison(lr_results: dict[str, float], rf_results: dict[str, float], nn_results: dict[str, float], nn_weighted_results: dict[str, float], save_path: str = "models_comparison.png"):
-    """Generuje wykres słupkowy porównujący Regresję Logistyczną, Random Forest, NN bez wag i NN z wagami."""
+def plot_models_comparison(lr_results: dict[str, float], rf_results: dict[str, float], nn_results: dict[str, float], nn_weighted_results: dict[str, float], save_path: str = "models_comparison.png", held_out_attacks: set | None = None):
+    """Generuje wykres słupkowy porównujący Regresję Logistyczną, Random Forest, NN bez wag i NN z wagami.
+    Kolumny odpowiadające held-out atakom są oznaczone szarym tłem."""
+    held_out_attacks = held_out_attacks or set()
     labels = list(lr_results.keys())
     x = np.arange(len(labels))
     width = 0.2  # Szerokość słupków
 
     fig, ax = plt.subplots(figsize=(max(12, len(labels) * 2.2), 5))
-    
+
+    # Szare tło dla kolumn held-out
+    for i, label in enumerate(labels):
+        if label in held_out_attacks:
+            ax.axvspan(i - 2 * width, i + 2 * width, color='lightgray', alpha=0.4, zorder=0)
+
     # Rysowanie słupków dla czterech modeli
     bars_lr = ax.bar(x - 1.5*width, [lr_results[l] for l in labels], width, label='Regresja Logistyczna', color='#e05c5c', alpha=0.85, edgecolor='black', linewidth=0.7)
     bars_rf = ax.bar(x - 0.5*width, [rf_results[l] for l in labels], width, label='Random Forest', color='#5c9be0', alpha=0.85, edgecolor='black', linewidth=0.7)
@@ -215,11 +201,15 @@ def plot_models_comparison(lr_results: dict[str, float], rf_results: dict[str, f
     bars_nn_w = ax.bar(x + 1.5*width, [nn_weighted_results[l] for l in labels], width, label='Neural Network (z wagami)', color='#e0a05c', alpha=0.85, edgecolor='black', linewidth=0.7)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=25, ha="right")
+    tick_labels = [f"{l} *" if l in held_out_attacks else l for l in labels]
+    ax.set_xticklabels(tick_labels, rotation=25, ha="right")
     ax.set_ylim(0, 1.05)
     ax.axhline(0.5, ls="--", color="gray", label="Poziom losowy (0.5)")
     ax.set_ylabel("Skuteczność rozpoznania")
-    ax.set_title("Porównanie modeli (Holdout)")
+    title = "Porównanie modeli (Holdout)"
+    if held_out_attacks:
+        title += "  (* = atak niewidziany podczas treningu)"
+    ax.set_title(title)
     ax.legend(loc="lower left", fontsize=9)
     
     # Dodanie etykiet tekstowych nad słupkami
@@ -248,14 +238,22 @@ def plot_models_comparison(lr_results: dict[str, float], rf_results: dict[str, f
 
 def main(pythia_root: str = "./pythia",
          max_samples: int = 30,
-         activation_value: float = 1.0):
+         activation_value: float = 1.0,
+         held_out_attacks: list[str] | None = None):
+    """held_out_attacks: ataki wykluczone z treningu, ale ewaluowane na zbiorze testowym."""
+
+    held_out_attacks = set(held_out_attacks or [])
 
     root = Path(pythia_root)
     partitions = sorted([p.name for p in root.iterdir() if p.is_dir()])
-    attacks = [p for p in partitions if p.startswith("attack_") and p not in ["attack_a", "attack_b", "attack_c", "attack_d"]]
-    
+    attacks = [p for p in partitions if p.startswith("attack_")]
+    train_attacks = [a for a in attacks if a not in held_out_attacks]
+
     print(f"Znalezione partycje: {partitions}")
     print(f"Wykryte ataki: {attacks}")
+    if held_out_attacks:
+        print(f"Ataki wykluczone z treningu (held-out): {sorted(held_out_attacks)}")
+        print(f"Ataki używane do treningu: {train_attacks}")
     print(f"Używam {N_WORKERS} rdzeni CPU\n")
 
     # 1. PRZYGOTOWANIE ŚCIEŻEK
@@ -285,7 +283,7 @@ def main(pythia_root: str = "./pythia",
     X_train_full_list.append(np.array([s.flatten() for s in clean_train]))
     y_train_full_list.append(np.zeros(len(clean_train)))
     
-    active_attacks = [att for att in attacks if len(train_signatures[att]) > 0]
+    active_attacks = [att for att in train_attacks if len(train_signatures[att]) > 0]
     if len(active_attacks) > 0:
         for att in active_attacks:
             att_train = train_signatures[att]
@@ -306,7 +304,7 @@ def main(pythia_root: str = "./pythia",
     
     if len(active_attacks) > 0:
         samples_per_attack = len(clean_train) // len(active_attacks)
-        print(f"  -> Wyrównywanie proporcji 50/50: Pobieram po {samples_per_attack} próbek z każdego z {len(active_attacks)} ataków.")
+        print(f"  -> Wyrównywanie proporcji 50/50: Pobieram po {samples_per_attack} próbek z każdego z {len(active_attacks)} ataków (treningowych).")
         
         for att in active_attacks:
             att_train = train_signatures[att]
@@ -369,7 +367,10 @@ def main(pythia_root: str = "./pythia",
     print("Trenowanie Neural Network z wagami (pełny zbiór, class_weights)...", end=" ", flush=True)
     
     clf_nn_weighted = keras.Sequential([
-        keras.layers.Dense(256, activation="relu", input_dim=X_train_full.shape[1]),
+        # keras.layers.Dense(512, activation="sigmoid", input_dim=X_train_full.shape[1]),
+        # keras.layers.BatchNormalization(),
+        # keras.layers.Dropout(0.1),
+        keras.layers.Dense(256, activation="relu"),
         keras.layers.BatchNormalization(),
         keras.layers.Dropout(0.1),
         keras.layers.Dense(128, activation="swish"),
@@ -439,7 +440,8 @@ def main(pythia_root: str = "./pythia",
             rf_results[att] = np.mean(preds_rf_att == 1)
             nn_results[att] = np.mean(preds_nn_att == 1)
             nn_weighted_results[att] = np.mean(preds_nn_weighted_att == 1)
-            print(f"Atak {att:<14} -> LR: {lr_results[att]*100:.1f}% | RF: {rf_results[att]*100:.1f}% | NN: {nn_results[att]*100:.1f}% | NN(wagi): {nn_weighted_results[att]*100:.1f}%")
+            tag = " [HELD-OUT]" if att in held_out_attacks else ""
+            print(f"Atak {att:<14}{tag} -> LR: {lr_results[att]*100:.1f}% | RF: {rf_results[att]*100:.1f}% | NN: {nn_results[att]*100:.1f}% | NN(wagi): {nn_weighted_results[att]*100:.1f}%")
 
     # Przykładowe szczegółowe mapy (wgląd w pojedyncze modele)
     sample_sigs = {"clean (model #0)": train_signatures["clean"][0]}
@@ -449,12 +451,18 @@ def main(pythia_root: str = "./pythia",
             break
                 
     plot_signature_heatmaps(sample_sigs, classes_to_show=[0, 1, 2, 3, 4])
-    plot_models_comparison(lr_results, rf_results, nn_results, nn_weighted_results)
+    plot_models_comparison(lr_results, rf_results, nn_results, nn_weighted_results, held_out_attacks=held_out_attacks)
 
     return clf_lr, clf_rf, clf_nn, clf_nn_weighted, lr_results, rf_results, nn_results, nn_weighted_results
 
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    root = sys.argv[1] if len(sys.argv) > 1 else "./Pythia"
-    main(pythia_root=root, max_samples=500)
+    import argparse
+    parser = argparse.ArgumentParser(description="Pythia model verification pipeline")
+    parser.add_argument("pythia_root", nargs="?", default="./Pythia", help="Ścieżka do katalogu Pythia")
+    parser.add_argument("--max-samples", type=int, default=500, help="Maksymalna liczba próbek na partycję")
+    parser.add_argument("--held-out", nargs="+", default=[], metavar="ATTACK",
+                        help="Ataki wykluczone z treningu, np. --held-out attack_e attack_f")
+    args = parser.parse_args()
+    main(pythia_root=args.pythia_root, max_samples=args.max_samples, held_out_attacks=args.held_out)
